@@ -1,0 +1,6 @@
+{
+  "name": "Cosmo Game Store",
+  "description": "Cosmo Game Store client with built-in store browser, native library, curated recommendations, settings, and official APK & XAPK installer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
