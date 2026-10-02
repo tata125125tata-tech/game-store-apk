@@ -1,10 +1,16 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,10 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.core.content.ContextCompat
 import com.example.downloader.CosmoDownloadManager
+import com.example.downloader.DownloadNotificationHelper
 import com.example.ui.components.CosmoBottomNavigation
 import com.example.ui.components.CosmoScreen
 import com.example.ui.components.CosmoTopAppBar
@@ -36,26 +44,85 @@ import com.example.ui.theme.CosmoBackgroundDark
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val navDestination = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        handleIntent(intent)
+
         setContent {
             MyApplicationTheme {
-                CosmoApp()
+                CosmoApp(
+                    initialDestination = navDestination.value,
+                    onDestinationHandled = { navDestination.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val dest = intent?.getStringExtra(DownloadNotificationHelper.EXTRA_DESTINATION)
+        if (!dest.isNullOrBlank()) {
+            navDestination.value = dest
         }
     }
 }
 
 @Composable
-fun CosmoApp() {
+fun CosmoApp(
+    initialDestination: String?,
+    onDestinationHandled: () -> Unit
+) {
     val context = LocalContext.current
     val downloadManager = remember { CosmoDownloadManager.getInstance(context) }
-    val activeDownloadsCount by downloadManager.activeDownloadsCount.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var currentScreen by remember { mutableStateOf(CosmoScreen.BROWSER) }
     var previousScreen by remember { mutableStateOf(CosmoScreen.BROWSER) }
+
+    // Request notification permission for Android 13+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasPermission) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // Handle deep navigation from notifications
+    LaunchedEffect(initialDestination) {
+        if (initialDestination != null) {
+            when (initialDestination) {
+                DownloadNotificationHelper.DESTINATION_LIBRARY -> {
+                    previousScreen = currentScreen
+                    currentScreen = CosmoScreen.LIBRARY
+                }
+                DownloadNotificationHelper.DESTINATION_DOWNLOADS -> {
+                    previousScreen = currentScreen
+                    currentScreen = CosmoScreen.DOWNLOADS
+                }
+            }
+            onDestinationHandled()
+        }
+    }
 
     fun navigateTo(screen: CosmoScreen) {
         if (currentScreen != screen) {
@@ -77,13 +144,8 @@ fun CosmoApp() {
         topBar = {
             CosmoTopAppBar(
                 currentScreen = currentScreen,
-                activeDownloadsCount = activeDownloadsCount,
-                onDownloadsClicked = {
-                    if (currentScreen == CosmoScreen.DOWNLOADS) {
-                        currentScreen = previousScreen
-                    } else {
-                        navigateTo(CosmoScreen.DOWNLOADS)
-                    }
+                onBackClicked = {
+                    currentScreen = previousScreen
                 }
             )
         },
@@ -92,8 +154,7 @@ fun CosmoApp() {
                 currentScreen = if (currentScreen == CosmoScreen.DOWNLOADS) previousScreen else currentScreen,
                 onTabSelected = { screen ->
                     navigateTo(screen)
-                },
-                activeDownloadsCount = activeDownloadsCount
+                }
             )
         },
         snackbarHost = {
@@ -124,7 +185,8 @@ fun CosmoApp() {
                 }
                 CosmoScreen.LIBRARY -> {
                     MyLibraryScreen(
-                        onNavigateToBrowser = { navigateTo(CosmoScreen.BROWSER) }
+                        onNavigateToBrowser = { navigateTo(CosmoScreen.BROWSER) },
+                        onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) }
                     )
                 }
                 CosmoScreen.FOR_YOU -> {
@@ -138,7 +200,7 @@ fun CosmoApp() {
                 }
                 CosmoScreen.DOWNLOADS -> {
                     DownloadsScreen(
-                        onNavigateToBrowser = { navigateTo(CosmoScreen.BROWSER) },
+                        onNavigateToLibrary = { navigateTo(CosmoScreen.LIBRARY) },
                         onBack = { currentScreen = previousScreen }
                     )
                 }

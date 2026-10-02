@@ -1,29 +1,64 @@
 # 🎮 Cosmo Game Store — Android Client
 
+[![Build & Release Debug APK](https://github.com/tata125125tata-tech/game-store-apk/actions/workflows/build-and-release.yml/badge.svg)](https://github.com/tata125125tata-tech/game-store-apk/actions/workflows/build-and-release.yml)
+[![Direct APK Download](https://img.shields.io/badge/Download-CosmoGameStore--debug.apk-00E5FF?style=flat&logo=android&logoColor=black)](https://github.com/tata125125tata-tech/game-store-apk/releases/latest/download/CosmoGameStore-debug.apk)
+[![Latest Release](https://img.shields.io/github/v/release/tata125125tata-tech/game-store-apk?color=8B5CF6&label=Release)](https://github.com/tata125125tata-tech/game-store-apk/releases)
+
 An Android client for **Cosmo Game Store** with a built-in store browser, native library, curated recommendations, settings, and official APK & XAPK installer.
 
 ---
 
-## 📥 Direct APK Download
+## 📥 Direct APK Download Links
 
-### Option 1: GitHub Releases (Recommended)
-Every push to `main` / `master` or release tag automatically compiles a debug APK and uploads it to GitHub Releases.
+### ⚡ 1. One-Click Direct Download (Latest Release)
+Tap the link below on your Android device to immediately download the latest compiled debug APK:
 
-1. Navigate to the **[Releases](../../releases)** tab on GitHub.
-2. Look for the latest release (e.g., `latest` or `v1.0.0`).
-3. Under **Assets**, click **`CosmoGameStore-debug.apk`** to download directly to your Android device or PC.
-4. On your device, tap the downloaded APK to install.
-   *(Note: Ensure you allow "Install Unknown Apps" for your browser or file manager).*
+👉 **[Download CosmoGameStore-debug.apk](https://github.com/tata125125tata-tech/game-store-apk/releases/latest/download/CosmoGameStore-debug.apk)**
 
-### Option 2: GitHub Actions Artifacts
-1. Go to the **[Actions](../../actions)** tab.
-2. Click on the latest run under **Build & Release Debug APK**.
-3. Scroll down to the **Artifacts** section at the bottom of the page.
-4. Download the **`CosmoGameStore-debug-apk`** ZIP archive, which contains the installable `.apk` file and its SHA-256 verification hash.
+*(Direct Link: `https://github.com/tata125125tata-tech/game-store-apk/releases/latest/download/CosmoGameStore-debug.apk`)*
 
 ---
 
-## ✨ Features
+### 📦 2. Download from GitHub Releases
+1. Visit the **[Releases Page](https://github.com/tata125125tata-tech/game-store-apk/releases)**.
+2. Select the latest release version.
+3. Under **Assets**, click **`CosmoGameStore-debug.apk`**.
+4. Open the downloaded file to install on your Android device.
+
+---
+
+### 🛠️ 3. Download from GitHub Actions Run Artifacts
+1. Go to the **[GitHub Actions Tab](https://github.com/tata125125tata-tech/game-store-apk/actions)**.
+2. Click on the latest run of **Build & Release Debug APK**.
+3. Scroll down to the **Artifacts** section.
+4. Click **`CosmoGameStore-debug-apk`** to download the ZIP file containing the APK and its SHA-256 verification checksum.
+
+---
+
+## 🚀 How to Push to GitHub
+
+To push your repository to `tata125125tata-tech/game-store-apk` and automatically trigger the build:
+
+```bash
+# Rename branch to main
+git branch -M main
+
+# Stage and commit all files
+git add .
+git commit -m "Initialize Cosmo Game Store with GitHub Actions CI/CD"
+
+# Push to GitHub
+git push -u origin main
+```
+
+Once pushed, GitHub Actions will automatically:
+1. Compile the debug APK using JDK 21 and Gradle.
+2. Generate SHA-256 integrity hash.
+3. Publish a new Release on `https://github.com/tata125125tata-tech/game-store-apk/releases` with the direct download link!
+
+---
+
+## ✨ Application Features
 
 - **Store Browser (Home)**: Seamlessly loads `https://cosmo-game.pages.dev/` with cached state and back-stack history.
 - **Native APK/XAPK Interception**:
@@ -42,29 +77,7 @@ Every push to `main` / `master` or release tag automatically compiles a debug AP
 
 ---
 
-## ⚙️ Automated GitHub Actions Workflow
-
-The repository includes a ready-to-run GitHub Actions workflow located at:
-```text
-.github/workflows/build-and-release.yml
-```
-
-### When It Runs:
-1. **Push to `main` or `master`**: Automatically compiles the debug APK and updates the `latest` rolling release.
-2. **Git Tags (`v*`)**: Whenever you push a tag (e.g., `git tag v1.0.0 && git push origin v1.0.0`), a dedicated release is published.
-3. **Manual Trigger (`workflow_dispatch`)**:
-   - Go to **Actions** → **Build & Release Debug APK** → **Run workflow**.
-   - Optionally specify a custom release title and tag.
-
----
-
 ## 🛠️ Local Development & Build
-
-### Prerequisites:
-- JDK 17 or JDK 21
-- Android SDK (API 34 / 36)
-
-### Build Commands:
 
 ```bash
 # Build debug APK locally
@@ -72,9 +85,4 @@ The repository includes a ready-to-run GitHub Actions workflow located at:
 
 # Run unit and Robolectric tests
 ./gradlew testDebugUnitTest
-```
-
-The resulting debug APK will be located at:
-```text
-app/build/outputs/apk/debug/app-debug.apk
 ```

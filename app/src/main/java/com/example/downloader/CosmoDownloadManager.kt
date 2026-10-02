@@ -1,12 +1,15 @@
 package com.example.downloader
 
 import android.content.Context
-import android.net.Uri
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import com.example.installer.PackageInstallerManager
+import com.example.library.LibraryStore
 import com.example.model.DownloadItem
 import com.example.model.DownloadStatus
 import com.example.model.FileType
+import com.example.model.LibraryItem
 import com.example.settings.SettingsManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +26,6 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.URLDecoder
@@ -35,6 +37,8 @@ class CosmoDownloadManager private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val settingsManager = SettingsManager.getInstance(context)
+    private val notificationHelper = DownloadNotificationHelper(context)
+    private val libraryStore = LibraryStore.getInstance(context)
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -68,15 +72,33 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                     if (file.isFile && (file.name.endsWith(".apk", true) || file.name.endsWith(".xapk", true))) {
                         val isXapk = file.name.endsWith(".xapk", true)
                         val type = if (isXapk) FileType.XAPK else FileType.APK
-                        val pkg = if (!isXapk) {
-                            PackageInstallerManager.getPackageNameFromApk(context, file)
-                        } else null
+                        var pkg: String? = null
+                        var vName: String? = null
+                        var vCode: Long? = null
+                        var xapkInfo: com.example.model.XapkInfo? = null
+
+                        if (!isXapk) {
+                            pkg = PackageInstallerManager.getPackageNameFromApk(context, file)
+                            try {
+                                val pi = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+                                vName = pi?.versionName
+                                vCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi?.longVersionCode else pi?.versionCode?.toLong()
+                            } catch (e: Exception) {
+                                // Ignore
+                            }
+                        } else {
+                            xapkInfo = PackageInstallerManager.parseXapk(file).getOrNull()
+                            pkg = xapkInfo?.packageName
+                            vName = xapkInfo?.versionName
+                            vCode = xapkInfo?.versionCode
+                        }
 
                         val isInstalled = PackageInstallerManager.isPackageInstalled(context, pkg)
+                        val title = formatFileTitle(file.name)
 
                         val item = DownloadItem(
                             id = file.name,
-                            title = formatFileTitle(file.name),
+                            title = title,
                             originalUrl = "",
                             fileType = type,
                             localFilePath = file.absolutePath,
@@ -85,9 +107,29 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                             status = DownloadStatus.COMPLETED,
                             packageName = pkg,
                             isInstalled = isInstalled,
+                            xapkInfo = xapkInfo,
                             createdAt = file.lastModified()
                         )
                         scanned.add(item)
+
+                        // Register into persistent LibraryStore
+                        libraryStore.addItem(
+                            LibraryItem(
+                                id = file.name,
+                                title = title,
+                                packageName = pkg,
+                                versionName = vName,
+                                versionCode = vCode,
+                                iconUrl = null,
+                                localFilePath = file.absolutePath,
+                                isXapk = isXapk,
+                                hasObb = (xapkInfo?.totalObbs ?: 0) > 0,
+                                hasSplitApks = (xapkInfo?.totalApks ?: 1) > 1,
+                                totalApks = xapkInfo?.totalApks ?: 1,
+                                fileSizeBytes = file.length(),
+                                downloadedAt = file.lastModified()
+                            )
+                        )
                     }
                 }
 
@@ -109,7 +151,6 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         val fileName = sanitizeFileName(url, suggestedTitle, fileType)
         val targetFile = File(settingsManager.getDownloadDir(), fileName)
 
-        // Check if an item already exists with this URL or file path
         val existing = _downloads.value.find { it.localFilePath == targetFile.absolutePath || it.originalUrl == url }
         val id = existing?.id ?: UUID.randomUUID().toString()
 
@@ -127,6 +168,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         )
 
         updateOrAddItem(downloadItem)
+        notificationHelper.updateProgressNotification(downloadItem)
         enqueueDownload(downloadItem, targetFile)
 
         return id
@@ -139,6 +181,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         val file = File(item.localFilePath)
         val updated = item.copy(status = DownloadStatus.PENDING, errorMessage = null)
         updateOrAddItem(updated)
+        notificationHelper.updateProgressNotification(updated)
         enqueueDownload(updated, file)
     }
 
@@ -147,18 +190,22 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         downloadJobs.remove(id)
 
         updateItem(id) { item ->
-            item.copy(status = DownloadStatus.PAUSED, speedBytesPerSec = 0L)
+            val paused = item.copy(status = DownloadStatus.PAUSED, speedBytesPerSec = 0L)
+            notificationHelper.updateProgressNotification(paused)
+            paused
         }
     }
 
     fun cancelDownload(id: String, deleteFile: Boolean = true) {
         downloadJobs[id]?.cancel()
         downloadJobs.remove(id)
+        notificationHelper.cancelNotification(id)
 
         val item = _downloads.value.find { it.id == id }
         if (deleteFile && item != null) {
             File(item.localFilePath).delete()
             _downloads.value = _downloads.value.filter { it.id != id }
+            libraryStore.removeItem(id)
         } else {
             updateItem(id) { it.copy(status = DownloadStatus.CANCELLED, speedBytesPerSec = 0L) }
         }
@@ -176,6 +223,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                 item
             }
         }
+        libraryStore.refreshState()
     }
 
     fun refreshInstalledStatus() {
@@ -187,6 +235,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                 item
             }
         }
+        libraryStore.refreshState()
     }
 
     private fun enqueueDownload(item: DownloadItem, file: File) {
@@ -206,7 +255,6 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                 val response = okHttpClient.newCall(request).execute()
 
                 if (!response.isSuccessful && response.code != 206) {
-                    // If Range request failed (e.g. 416), retry from beginning
                     if (response.code == 416 || existingLength > 0) {
                         file.delete()
                         existingLength = 0L
@@ -224,13 +272,14 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                 Log.d(TAG, "Download job cancelled for ${item.id}")
             } catch (e: Exception) {
                 Log.e(TAG, "Download error for ${item.id}", e)
-                updateItem(item.id) {
-                    it.copy(
-                        status = DownloadStatus.FAILED,
-                        errorMessage = e.message ?: "Download failed",
-                        speedBytesPerSec = 0L
-                    )
-                }
+                val failedItem = _downloads.value.find { it.id == item.id }?.copy(
+                    status = DownloadStatus.FAILED,
+                    errorMessage = e.message ?: "Download failed",
+                    speedBytesPerSec = 0L
+                ) ?: item.copy(status = DownloadStatus.FAILED, errorMessage = e.message)
+
+                updateItem(item.id) { failedItem }
+                notificationHelper.showDownloadFailedNotification(failedItem)
             } finally {
                 downloadJobs.remove(item.id)
             }
@@ -265,6 +314,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         var lastTime = System.currentTimeMillis()
         var lastBytes = downloaded
         var currentSpeed = 0L
+        var lastNotificationTime = System.currentTimeMillis()
 
         val buffer = ByteArray(8192)
         val inStream: InputStream = body.byteStream()
@@ -284,43 +334,90 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                         lastTime = now
                         lastBytes = downloaded
 
-                        updateItem(id) {
-                            it.copy(
-                                totalBytes = totalBytes,
-                                downloadedBytes = downloaded,
-                                speedBytesPerSec = currentSpeed
-                            )
+                        val updated = _downloads.value.find { it.id == id }?.copy(
+                            totalBytes = totalBytes,
+                            downloadedBytes = downloaded,
+                            speedBytesPerSec = currentSpeed
+                        )
+
+                        if (updated != null) {
+                            updateItem(id) { updated }
+
+                            // Real-time notification update throttled to ~750ms
+                            if (now - lastNotificationTime >= 750) {
+                                notificationHelper.updateProgressNotification(updated)
+                                lastNotificationTime = now
+                            }
                         }
                     }
                 }
             }
         }
 
-        // On complete
+        // Download Finished - Extract Metadata
         var parsedPkg: String? = null
+        var versionName: String? = null
+        var versionCode: Long? = null
         var xapkDetails: com.example.model.XapkInfo? = null
 
         val currentItem = _downloads.value.find { it.id == id }
         if (currentItem?.fileType == FileType.APK) {
             parsedPkg = PackageInstallerManager.getPackageNameFromApk(context, file)
+            try {
+                val pi = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+                versionName = pi?.versionName
+                versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi?.longVersionCode else pi?.versionCode?.toLong()
+            } catch (e: Exception) {
+                // Ignore
+            }
         } else if (currentItem?.fileType == FileType.XAPK) {
             xapkDetails = PackageInstallerManager.parseXapk(file).getOrNull()
             parsedPkg = xapkDetails?.packageName
+            versionName = xapkDetails?.versionName
+            versionCode = xapkDetails?.versionCode
         }
 
         val isInstalled = PackageInstallerManager.isPackageInstalled(context, parsedPkg)
 
-        updateItem(id) {
-            it.copy(
-                status = DownloadStatus.COMPLETED,
-                totalBytes = file.length(),
-                downloadedBytes = file.length(),
-                speedBytesPerSec = 0L,
-                packageName = parsedPkg,
-                isInstalled = isInstalled,
-                xapkInfo = xapkDetails
-            )
-        }
+        val completedItem = (currentItem ?: DownloadItem(
+            id = id,
+            title = formatFileTitle(file.name),
+            originalUrl = "",
+            fileType = if (file.name.endsWith(".xapk", true)) FileType.XAPK else FileType.APK,
+            localFilePath = file.absolutePath
+        )).copy(
+            status = DownloadStatus.COMPLETED,
+            totalBytes = file.length(),
+            downloadedBytes = file.length(),
+            speedBytesPerSec = 0L,
+            packageName = parsedPkg,
+            isInstalled = isInstalled,
+            xapkInfo = xapkDetails
+        )
+
+        updateItem(id) { completedItem }
+
+        // Automatically persist into My Library
+        val libraryItem = LibraryItem(
+            id = id,
+            title = completedItem.title,
+            packageName = parsedPkg,
+            versionName = versionName,
+            versionCode = versionCode,
+            iconUrl = completedItem.iconUrl,
+            localFilePath = file.absolutePath,
+            isXapk = completedItem.fileType == FileType.XAPK,
+            hasObb = (xapkDetails?.totalObbs ?: 0) > 0,
+            hasSplitApks = (xapkDetails?.totalApks ?: 1) > 1,
+            totalApks = xapkDetails?.totalApks ?: 1,
+            fileSizeBytes = file.length(),
+            downloadedAt = System.currentTimeMillis(),
+            originalUrl = completedItem.originalUrl
+        )
+        libraryStore.addItem(libraryItem)
+
+        // Show real Android system notification: "Download complete" with "Open My Library" action
+        notificationHelper.showDownloadCompleteNotification(completedItem)
     }
 
     private fun updateItem(id: String, update: (DownloadItem) -> DownloadItem) {

@@ -1,9 +1,12 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,30 +24,35 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +61,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -63,9 +70,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import coil.compose.AsyncImage
 import com.example.downloader.CosmoDownloadManager
+import com.example.installer.PackageInstallerManager
 import com.example.library.LibraryManager
+import com.example.library.LibraryStore
 import com.example.model.InstalledGame
+import com.example.model.LibraryItem
+import com.example.ui.theme.CosmoAmber
 import com.example.ui.theme.CosmoBackgroundDark
 import com.example.ui.theme.CosmoCardBorder
 import com.example.ui.theme.CosmoCardDark
@@ -74,50 +86,40 @@ import com.example.ui.theme.CosmoGreen
 import com.example.ui.theme.CosmoPurple
 import com.example.ui.theme.CosmoRed
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.io.File
 
 @Composable
 fun MyLibraryScreen(
     onNavigateToBrowser: () -> Unit,
+    onNavigateToDownloads: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val libraryStore = remember { LibraryStore.getInstance(context) }
     val downloadManager = remember { CosmoDownloadManager.getInstance(context) }
 
-    var games by remember { mutableStateOf<List<InstalledGame>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("ALL") }
+    val libraryItems by libraryStore.items.collectAsState()
+    val activeDownloadsCount by downloadManager.activeDownloadsCount.collectAsState()
 
-    fun refreshGames() {
+    var selectedTab by remember { mutableStateOf("DOWNLOADS") } // DOWNLOADS or INSTALLED
+    var installedGames by remember { mutableStateOf<List<InstalledGame>>(emptyList()) }
+    var isLoadingInstalled by remember { mutableStateOf(false) }
+
+    var itemToDelete by remember { mutableStateOf<LibraryItem?>(null) }
+    var installingItemStatus by remember { mutableStateOf<String?>(null) }
+
+    fun refreshInstalled() {
         scope.launch {
-            isLoading = true
-            games = LibraryManager.loadInstalledGames(context)
-            isLoading = false
+            isLoadingInstalled = true
+            installedGames = LibraryManager.loadInstalledGames(context)
+            isLoadingInstalled = false
         }
     }
 
     LaunchedEffect(Unit) {
-        refreshGames()
-    }
-
-    val filteredGames = remember(games, searchQuery, selectedFilter) {
-        games.filter { game ->
-            val matchesQuery = searchQuery.isBlank() ||
-                game.appName.contains(searchQuery, ignoreCase = true) ||
-                game.packageName.contains(searchQuery, ignoreCase = true)
-
-            val matchesFilter = when (selectedFilter) {
-                "COSMO" -> game.isFromCosmo
-                "DEVICE" -> !game.isFromCosmo
-                else -> true
-            }
-
-            matchesQuery && matchesFilter
-        }
+        refreshInstalled()
+        downloadManager.refreshInstalledStatus()
     }
 
     Box(
@@ -127,195 +129,546 @@ fun MyLibraryScreen(
             .testTag("my_library_screen")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header Stats Banner
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-                    .border(1.dp, CosmoCardBorder, RoundedCornerShape(16.dp)),
-                colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Row(
+
+            // Active Downloads Banner if any running
+            if (activeDownloadsCount > 0) {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clickable { onNavigateToDownloads() }
+                        .border(1.dp, CosmoCyan.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                    colors = CardDefaults.cardColors(containerColor = CosmoCyan.copy(alpha = 0.1f)),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "GAME LIBRARY",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = CosmoCyan,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${games.size} Games Ready to Play",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Downloaded via Cosmo Store & Device games",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { refreshGames() },
+                    Row(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(CosmoCyan.copy(alpha = 0.15f))
-                            .testTag("library_refresh_button")
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Rescan Installed Games",
-                            tint = CosmoCyan
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = null,
+                                tint = CosmoCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "$activeDownloadsCount download in progress",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = CosmoCyan
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "View Downloads",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // Search Bar & Filter Chips
-            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search installed games...", fontSize = 13.sp) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = CosmoCyan, modifier = Modifier.size(20.dp))
+            // Tab Selector: Downloaded Packages vs All Installed Apps
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTab == "DOWNLOADS",
+                    onClick = { selectedTab = "DOWNLOADS" },
+                    label = {
+                        Text(
+                            text = "Downloaded Packages (${libraryItems.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("library_search_input"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CosmoCyan,
-                        unfocusedBorderColor = CosmoCardBorder,
-                        focusedContainerColor = CosmoCardDark,
-                        unfocusedContainerColor = CosmoCardDark
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
+                        selectedLabelColor = CosmoCyan,
+                        containerColor = CosmoCardDark,
+                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                     ),
-                    singleLine = true
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (selectedTab == "DOWNLOADS") CosmoCyan else CosmoCardBorder,
+                        selectedBorderColor = CosmoCyan,
+                        enabled = true,
+                        selected = selectedTab == "DOWNLOADS"
+                    )
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                FilterChip(
+                    selected = selectedTab == "INSTALLED",
+                    onClick = {
+                        selectedTab = "INSTALLED"
+                        refreshInstalled()
+                    },
+                    label = {
+                        Text(
+                            text = "Device Apps (${installedGames.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
+                        selectedLabelColor = CosmoCyan,
+                        containerColor = CosmoCardDark,
+                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        borderColor = if (selectedTab == "INSTALLED") CosmoCyan else CosmoCardBorder,
+                        selectedBorderColor = CosmoCyan,
+                        enabled = true,
+                        selected = selectedTab == "INSTALLED"
+                    )
+                )
+            }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        "ALL" to "All (${games.size})",
-                        "COSMO" to "From Cosmo (${games.count { it.isFromCosmo }})",
-                        "DEVICE" to "Device (${games.count { !it.isFromCosmo }})"
-                    ).forEach { (key, label) ->
-                        FilterChip(
-                            selected = selectedFilter == key,
-                            onClick = { selectedFilter = key },
-                            label = { Text(label, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                                selectedLabelColor = CosmoCyan,
-                                containerColor = CosmoCardDark,
-                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                borderColor = if (selectedFilter == key) CosmoCyan else CosmoCardBorder,
-                                selectedBorderColor = CosmoCyan,
-                                enabled = true,
-                                selected = selectedFilter == key
+            // Content List
+            if (selectedTab == "DOWNLOADS") {
+                if (libraryItems.isEmpty()) {
+                    // Empty state for downloaded items
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(CosmoCardDark),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderSpecial,
+                                    contentDescription = null,
+                                    tint = CosmoCyan,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Text(
+                                text = "Library is Empty",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Downloaded APK and XAPK packages automatically appear in My Library for instant installation.",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Button(
+                                onClick = onNavigateToBrowser,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = CosmoCyan,
+                                    contentColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Browse Web Store", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(libraryItems, key = { it.id }) { item ->
+                            val isInstalled = PackageInstallerManager.isPackageInstalled(context, item.packageName)
+                            LibraryPackageCard(
+                                item = item,
+                                isInstalled = isInstalled,
+                                onInstall = {
+                                    val file = File(item.localFilePath)
+                                    if (!file.exists()) {
+                                        Toast.makeText(context, "Package file not found on device", Toast.LENGTH_SHORT).show()
+                                        return@LibraryPackageCard
+                                    }
+
+                                    if (item.isXapk) {
+                                        scope.launch {
+                                            installingItemStatus = "Staging XAPK package..."
+                                            PackageInstallerManager.installXapk(
+                                                context = context,
+                                                xapkFile = file,
+                                                onProgress = { status -> installingItemStatus = status }
+                                            ).fold(
+                                                onSuccess = {
+                                                    installingItemStatus = null
+                                                    Toast.makeText(context, "Opening package installer...", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onFailure = { err ->
+                                                    installingItemStatus = null
+                                                    Toast.makeText(context, "Installation error: ${err.message}", Toast.LENGTH_LONG).show()
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        PackageInstallerManager.installApk(context, file).fold(
+                                            onSuccess = {
+                                                Toast.makeText(context, "Opening package installer...", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onFailure = { err ->
+                                                Toast.makeText(context, "Error: ${err.message}", Toast.LENGTH_LONG).show()
+                                            }
+                                        )
+                                    }
+                                },
+                                onOpen = {
+                                    val launched = PackageInstallerManager.openApp(context, item.packageName)
+                                    if (!launched) {
+                                        Toast.makeText(context, "Unable to launch application", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onDelete = { itemToDelete = item }
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Device Installed Apps Tab
+                if (isLoadingInstalled) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = CosmoCyan)
+                    }
+                } else if (installedGames.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No installed apps found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(installedGames, key = { it.packageName }) { game ->
+                            InstalledDeviceAppCard(
+                                game = game,
+                                onPlay = {
+                                    LibraryManager.launchApp(context, game.packageName)
+                                },
+                                onAppInfo = {
+                                    LibraryManager.openAppDetails(context, game.packageName)
+                                },
+                                onUninstall = {
+                                    LibraryManager.uninstallApp(context, game.packageName)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Non-floating Installation Status Notice
+        if (installingItemStatus != null) {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("Installing Package", fontWeight = FontWeight.Bold) },
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    ) {
+                        CircularProgressIndicator(color = CosmoCyan, modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(text = installingItemStatus ?: "Preparing installation...")
+                    }
+                },
+                confirmButton = { }
+            )
+        }
+
+        // Delete Dialog
+        if (itemToDelete != null) {
+            val item = itemToDelete!!
+            AlertDialog(
+                onDismissRequest = { itemToDelete = null },
+                title = { Text("Delete Library Item", fontWeight = FontWeight.Bold) },
+                text = { Text("Delete ${item.title} and remove the downloaded ${item.typeLabel} file from device storage?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            libraryStore.deleteItemAndFile(item.id)
+                            downloadManager.deleteDownload(item.id)
+                            itemToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CosmoRed)
+                    ) {
+                        Text("Delete", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { itemToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun LibraryPackageCard(
+    item: LibraryItem,
+    isInstalled: Boolean,
+    onInstall: () -> Unit,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val fileExists = item.fileExists
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Row 1: App icon, Title, Version, Delete action
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(CosmoBackgroundDark),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (!item.iconUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = item.iconUrl,
+                            contentDescription = item.title,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (item.isXapk) Icons.Default.Archive else Icons.Default.InstallMobile,
+                            contentDescription = null,
+                            tint = if (item.isXapk) CosmoPurple else CosmoCyan,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Badge: APK or XAPK
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    if (item.isXapk) CosmoPurple.copy(alpha = 0.2f)
+                                    else CosmoCyan.copy(alpha = 0.2f)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = item.typeLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.isXapk) CosmoPurple else CosmoCyan
+                            )
+                        }
+
+                        if (!item.versionName.isNullOrBlank()) {
+                            Text(
+                                text = "v${item.versionName}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        }
+
+                        Text(
+                            text = item.formattedSize,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Games List
-            if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = CosmoCyan)
-                }
-            } else if (filteredGames.isEmpty()) {
-                Box(
+            // XAPK Details indicator if applicable
+            if (item.isXapk) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .background(CosmoBackgroundDark, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = CosmoPurple,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = item.packageDetailsLabel,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Status and Action Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Status indicator
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!fileExists) {
                         Icon(
-                            imageVector = Icons.Default.SportsEsports,
+                            imageVector = Icons.Default.Warning,
                             contentDescription = null,
-                            tint = CosmoCyan,
-                            modifier = Modifier.size(56.dp)
+                            tint = CosmoRed,
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (searchQuery.isNotBlank()) "No Matching Games" else "No Games Installed",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            text = "File deleted from storage",
+                            fontSize = 11.sp,
+                            color = CosmoRed
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                    } else if (isInstalled) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = CosmoGreen,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (searchQuery.isNotBlank()) "Try a different search term" else "Install games from the Cosmo Web Store to see them in your Library.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            text = "Installed on device",
+                            fontSize = 11.sp,
+                            color = CosmoGreen,
+                            fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Button(
-                            onClick = onNavigateToBrowser,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = CosmoCyan,
-                                contentColor = Color.Black
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Find Games on Store", fontWeight = FontWeight.Bold)
-                        }
+                    } else {
+                        Text(
+                            text = "Downloaded ${item.formattedDate}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(filteredGames, key = { it.packageName }) { game ->
-                        InstalledGameCard(
-                            game = game,
-                            onPlay = {
-                                val launched = LibraryManager.launchApp(context, game.packageName)
-                                if (!launched) {
-                                    Toast.makeText(context, "Cannot open ${game.appName}", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onAppInfo = {
-                                LibraryManager.openAppDetails(context, game.packageName)
-                            },
-                            onUninstall = {
-                                LibraryManager.uninstallApp(context, game.packageName)
-                            }
+
+                // Natural, in-place button action (NO FLOATING BUTTON)
+                if (!fileExists) {
+                    OutlinedButton(
+                        onClick = onDelete,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Remove", fontSize = 11.sp, color = CosmoRed)
+                    }
+                } else if (isInstalled) {
+                    Button(
+                        onClick = onOpen,
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CosmoGreen,
+                            contentColor = Color.White
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Open", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                } else {
+                    Button(
+                        onClick = onInstall,
+                        shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (item.isXapk) CosmoPurple else CosmoCyan,
+                            contentColor = if (item.isXapk) Color.White else Color.Black
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.InstallMobile,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Install", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
@@ -324,14 +677,13 @@ fun MyLibraryScreen(
 }
 
 @Composable
-fun InstalledGameCard(
+fun InstalledDeviceAppCard(
     game: InstalledGame,
     onPlay: () -> Unit,
     onAppInfo: () -> Unit,
     onUninstall: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     val bitmap = remember(game.iconDrawable) {
         try {
             game.iconDrawable?.toBitmap(128, 128)?.asImageBitmap()
@@ -343,9 +695,9 @@ fun InstalledGameCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(14.dp)),
+            .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
-        shape = RoundedCornerShape(14.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Row(
             modifier = Modifier
@@ -353,11 +705,10 @@ fun InstalledGameCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // App Icon
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(CosmoBackgroundDark),
                 contentAlignment = Alignment.Center
             ) {
@@ -372,50 +723,26 @@ fun InstalledGameCard(
                         imageVector = Icons.Default.SportsEsports,
                         contentDescription = null,
                         tint = CosmoCyan,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Game Info
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = game.appName,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-
-                    if (game.isFromCosmo) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(CosmoPurple.copy(alpha = 0.25f))
-                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "COSMO",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CosmoPurple
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
                 Text(
-                    text = "v${game.versionName ?: "1.0"} · ${game.packageName}",
+                    text = game.appName,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = game.packageName,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
@@ -427,61 +754,19 @@ fun InstalledGameCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Play / Open Button
             Button(
                 onClick = onPlay,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = CosmoGreen,
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(36.dp),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.height(32.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Play", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-
-            // More Options Dropdown
-            Box {
-                IconButton(
-                    onClick = { menuExpanded = true },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.background(CosmoCardDark)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("App Details", color = MaterialTheme.colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = CosmoCyan) },
-                        onClick = {
-                            menuExpanded = false
-                            onAppInfo()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Uninstall", color = CosmoRed) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = CosmoRed) },
-                        onClick = {
-                            menuExpanded = false
-                            onUninstall()
-                        }
-                    )
-                }
+                Text("Open", fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
         }
     }

@@ -1,13 +1,8 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,17 +11,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,9 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -47,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.CosmoCardBorder
 import com.example.ui.theme.CosmoCyan
-import com.example.ui.theme.CosmoPurple
 import com.example.ui.theme.CosmoSurfaceDark
 
 enum class CosmoScreen(val title: String, val icon: ImageVector, val tag: String) {
@@ -55,67 +42,61 @@ enum class CosmoScreen(val title: String, val icon: ImageVector, val tag: String
     LIBRARY("My Library", Icons.Default.SportsEsports, "nav_library"),
     FOR_YOU("For You", Icons.Default.AutoAwesome, "nav_for_you"),
     SETTINGS("Settings", Icons.Default.Settings, "nav_settings"),
-    DOWNLOADS("Downloads", Icons.Default.Download, "nav_downloads")
+    DOWNLOADS("Downloads", Icons.Default.Language, "nav_downloads")
 }
 
 @Composable
 fun CosmoTopAppBar(
     currentScreen: CosmoScreen,
-    activeDownloadsCount: Int,
-    onDownloadsClicked: () -> Unit,
+    onBackClicked: (() -> Unit)? = null,
     onRefreshClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(52.dp)
             .background(CosmoSurfaceDark)
+            .border(width = 0.5.dp, color = CosmoCardBorder)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Brand & Title
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(CosmoCyan, CosmoPurple)
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SportsEsports,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+            if (onBackClicked != null && currentScreen == CosmoScreen.DOWNLOADS) {
+                IconButton(
+                    onClick = onBackClicked,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("top_bar_back_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
             }
-
-            Spacer(modifier = Modifier.width(10.dp))
 
             Column {
                 Text(
-                    text = "COSMO",
+                    text = "Cosmo Game Store",
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.sp,
-                        color = CosmoCyan
+                        fontWeight = FontWeight.Bold,
+                        color = CosmoCyan,
+                        fontSize = 16.sp
                     )
                 )
                 Text(
                     text = when (currentScreen) {
                         CosmoScreen.BROWSER -> "Store Browser"
-                        CosmoScreen.LIBRARY -> "My Installed Games"
-                        CosmoScreen.FOR_YOU -> "Curated For You"
-                        CosmoScreen.SETTINGS -> "Settings & Storage"
+                        CosmoScreen.LIBRARY -> "My Library"
+                        CosmoScreen.FOR_YOU -> "For You"
+                        CosmoScreen.SETTINGS -> "Settings"
                         CosmoScreen.DOWNLOADS -> "Download Manager"
                     },
                     style = MaterialTheme.typography.bodySmall.copy(
@@ -126,53 +107,19 @@ fun CosmoTopAppBar(
             }
         }
 
-        // Action Icons: Refresh + Download Manager Badge
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (onRefreshClicked != null && currentScreen == CosmoScreen.BROWSER) {
-                IconButton(
-                    onClick = onRefreshClicked,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .testTag("top_bar_refresh_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh Web Store",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-            }
-
-            // Downloads Icon with Badge
+        // Action icon: Web Refresh only when in browser
+        if (onRefreshClicked != null && currentScreen == CosmoScreen.BROWSER) {
             IconButton(
-                onClick = onDownloadsClicked,
+                onClick = onRefreshClicked,
                 modifier = Modifier
-                    .size(44.dp)
-                    .testTag("top_bar_downloads_button")
+                    .size(36.dp)
+                    .testTag("top_bar_refresh_button")
             ) {
-                BadgedBox(
-                    badge = {
-                        if (activeDownloadsCount > 0) {
-                            Badge(
-                                containerColor = CosmoCyan,
-                                contentColor = Color.Black
-                            ) {
-                                Text(
-                                    text = "$activeDownloadsCount",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Downloads Manager",
-                        tint = if (currentScreen == CosmoScreen.DOWNLOADS) CosmoCyan else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh Web Store",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -182,7 +129,6 @@ fun CosmoTopAppBar(
 fun CosmoBottomNavigation(
     currentScreen: CosmoScreen,
     onTabSelected: (CosmoScreen) -> Unit,
-    activeDownloadsCount: Int,
     modifier: Modifier = Modifier
 ) {
     val navItems = listOf(
@@ -198,7 +144,7 @@ fun CosmoBottomNavigation(
             .border(width = 0.5.dp, color = CosmoCardBorder)
             .testTag("bottom_navigation_bar"),
         containerColor = CosmoSurfaceDark,
-        tonalElevation = 8.dp
+        tonalElevation = 6.dp
     ) {
         navItems.forEach { screen ->
             val isSelected = currentScreen == screen
