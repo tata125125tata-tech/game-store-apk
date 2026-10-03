@@ -1,27 +1,24 @@
 package com.example.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import com.example.settings.ThemeMode
 
 private val CosmoDarkColorScheme = darkColorScheme(
-    primary = CosmoCyan,
-    onPrimary = Color(0xFF031622),
-    primaryContainer = Color(0xFF004D59),
-    onPrimaryContainer = Color(0xFFA5F3FC),
-    secondary = CosmoPurple,
-    onSecondary = Color(0xFF2E1065),
-    secondaryContainer = Color(0xFF4C1D95),
-    onSecondaryContainer = Color(0xFFDDD6FE),
-    tertiary = CosmoGreen,
-    onTertiary = Color(0xFF064E3B),
+    primary = Color.White,
+    onPrimary = Color.Black,
+    primaryContainer = Color(0xFF26262E),
+    onPrimaryContainer = Color.White,
+    secondary = Color(0xFFD4D4D8),
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF27272A),
+    onSecondaryContainer = Color(0xFFE4E4E7),
+    tertiary = CosmoCyan,
+    onTertiary = Color.Black,
     background = CosmoBackgroundDark,
     onBackground = CosmoTextPrimary,
     surface = CosmoSurfaceDark,
@@ -33,21 +30,21 @@ private val CosmoDarkColorScheme = darkColorScheme(
 )
 
 private val CosmoLightColorScheme = lightColorScheme(
-    primary = CosmoBlue,
+    primary = Color.Black,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFDBEAFE),
-    onPrimaryContainer = Color(0xFF1E3A8A),
-    secondary = CosmoPurple,
+    primaryContainer = Color(0xFFE4E4E7),
+    onPrimaryContainer = Color.Black,
+    secondary = Color(0xFF3F3F46),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFEDE9FE),
-    onSecondaryContainer = Color(0xFF5B21B6),
-    tertiary = CosmoGreen,
+    secondaryContainer = Color(0xFFF4F4F5),
+    onSecondaryContainer = Color(0xFF18181B),
+    tertiary = CosmoBlue,
     onTertiary = Color.White,
     background = CosmoBackgroundLight,
     onBackground = CosmoTextPrimaryLight,
     surface = CosmoSurfaceLight,
     onSurface = CosmoTextPrimaryLight,
-    surfaceVariant = Color(0xFFE2E8F0),
+    surfaceVariant = Color(0xFFF1F5F9),
     onSurfaceVariant = CosmoTextSecondaryLight,
     outline = CosmoCardBorderLight,
     error = CosmoRed
@@ -55,11 +52,17 @@ private val CosmoLightColorScheme = lightColorScheme(
 
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = true, // Default to sleek cosmic dark theme
-    dynamicColor: Boolean = false, // Keep brand cosmic colors
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) CosmoDarkColorScheme else CosmoLightColorScheme
+    val isSystemDark = isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        ThemeMode.SYSTEM -> isSystemDark
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
+
+    val colorScheme = if (isDark) CosmoDarkColorScheme else CosmoLightColorScheme
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,

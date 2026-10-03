@@ -3,6 +3,7 @@ package com.example
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -11,10 +12,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -30,8 +39,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.core.content.ContextCompat
-import com.example.downloader.CosmoDownloadManager
 import com.example.downloader.DownloadNotificationHelper
+import com.example.settings.SettingsManager
 import com.example.ui.components.CosmoBottomNavigation
 import com.example.ui.components.CosmoScreen
 import com.example.ui.components.CosmoTopAppBar
@@ -40,24 +49,29 @@ import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.ForYouScreen
 import com.example.ui.screens.MyLibraryScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.theme.CosmoBackgroundDark
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
     private val navDestination = mutableStateOf<String?>(null)
+    private val deepLinkUrl = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        handleIntent(intent)
+        handleIncomingIntent(intent)
 
         setContent {
-            MyApplicationTheme {
+            val settingsManager = remember { SettingsManager.getInstance(this) }
+            val themeMode by settingsManager.themeMode.collectAsState()
+
+            MyApplicationTheme(themeMode = themeMode) {
                 CosmoApp(
                     initialDestination = navDestination.value,
-                    onDestinationHandled = { navDestination.value = null }
+                    initialDeepLinkUrl = deepLinkUrl.value,
+                    onDestinationHandled = { navDestination.value = null },
+                    onDeepLinkHandled = { deepLinkUrl.value = null }
                 )
             }
         }
@@ -66,11 +80,24 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        handleIncomingIntent(intent)
     }
 
-    private fun handleIntent(intent: Intent?) {
-        val dest = intent?.getStringExtra(DownloadNotificationHelper.EXTRA_DESTINATION)
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+
+        // 1. Check Deep Link: https://cosmo-game.pages.dev/
+        if (Intent.ACTION_VIEW == intent.action && intent.data != null) {
+            val uri: Uri? = intent.data
+            if (uri != null && uri.host?.contains("cosmo-game.pages.dev") == true) {
+                deepLinkUrl.value = uri.toString()
+                navDestination.value = "browser"
+                return
+            }
+        }
+
+        // 2. Check Notification Navigation
+        val dest = intent.getStringExtra(DownloadNotificationHelper.EXTRA_DESTINATION)
         if (!dest.isNullOrBlank()) {
             navDestination.value = dest
         }
@@ -80,14 +107,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CosmoApp(
     initialDestination: String?,
-    onDestinationHandled: () -> Unit
+    initialDeepLinkUrl: String?,
+    onDestinationHandled: () -> Unit,
+    onDeepLinkHandled: () -> Unit
 ) {
     val context = LocalContext.current
-    val downloadManager = remember { CosmoDownloadManager.getInstance(context) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     var currentScreen by remember { mutableStateOf(CosmoScreen.BROWSER) }
     var previousScreen by remember { mutableStateOf(CosmoScreen.BROWSER) }
+    var activeDeepLinkUrl by remember { mutableStateOf<String?>(null) }
 
     // Request notification permission for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -107,6 +136,16 @@ fun CosmoApp(
         }
     }
 
+    // Handle deep link URL
+    LaunchedEffect(initialDeepLinkUrl) {
+        if (!initialDeepLinkUrl.isNullOrBlank()) {
+            activeDeepLinkUrl = initialDeepLinkUrl
+            previousScreen = currentScreen
+            currentScreen = CosmoScreen.BROWSER
+            onDeepLinkHandled()
+        }
+    }
+
     // Handle deep navigation from notifications
     LaunchedEffect(initialDestination) {
         if (initialDestination != null) {
@@ -118,6 +157,10 @@ fun CosmoApp(
                 DownloadNotificationHelper.DESTINATION_DOWNLOADS -> {
                     previousScreen = currentScreen
                     currentScreen = CosmoScreen.DOWNLOADS
+                }
+                "browser" -> {
+                    previousScreen = currentScreen
+                    currentScreen = CosmoScreen.BROWSER
                 }
             }
             onDestinationHandled()
@@ -131,7 +174,7 @@ fun CosmoApp(
         }
     }
 
-    // Handle back button when on sub-screens
+    // System BackHandler
     BackHandler(enabled = currentScreen != CosmoScreen.BROWSER) {
         currentScreen = if (currentScreen == CosmoScreen.DOWNLOADS) previousScreen else CosmoScreen.BROWSER
     }
@@ -139,9 +182,11 @@ fun CosmoApp(
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
-            .background(CosmoBackgroundDark)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("cosmo_main_scaffold"),
         topBar = {
+            // Note: CosmoTopAppBar internally returns empty if currentScreen == CosmoScreen.BROWSER
+            // to eliminate duplicate browser/header bar
             CosmoTopAppBar(
                 currentScreen = currentScreen,
                 onBackClicked = {
@@ -166,43 +211,63 @@ fun CosmoApp(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Keep Browser WebView preserved so page navigation and scroll state are never lost
+            // WebView state preservation: BrowserScreen is kept alive in background
             val isBrowser = currentScreen == CosmoScreen.BROWSER
             Box(
                 modifier = if (isBrowser) Modifier.fillMaxSize() else Modifier.fillMaxSize().alpha(0f)
             ) {
                 BrowserScreen(
                     isVisible = isBrowser,
+                    deepLinkUrl = activeDeepLinkUrl,
                     onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) },
                     snackbarHostState = snackbarHostState
                 )
             }
 
-            // Native screens rendered when active
-            when (currentScreen) {
-                CosmoScreen.BROWSER -> {
-                    // Browser is shown directly above
-                }
-                CosmoScreen.LIBRARY -> {
-                    MyLibraryScreen(
-                        onNavigateToBrowser = { navigateTo(CosmoScreen.BROWSER) },
-                        onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) }
-                    )
-                }
-                CosmoScreen.FOR_YOU -> {
-                    ForYouScreen(
-                        onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) },
-                        snackbarHostState = snackbarHostState
-                    )
-                }
-                CosmoScreen.SETTINGS -> {
-                    SettingsScreen()
-                }
-                CosmoScreen.DOWNLOADS -> {
-                    DownloadsScreen(
-                        onNavigateToLibrary = { navigateTo(CosmoScreen.LIBRARY) },
-                        onBack = { currentScreen = previousScreen }
-                    )
+            // Smooth short fade/slide animation for native tab switching
+            if (!isBrowser) {
+                AnimatedContent(
+                    targetState = currentScreen,
+                    transitionSpec = {
+                        val isForward = targetState.ordinal > initialState.ordinal
+                        (fadeIn(animationSpec = tween(180)) + slideInHorizontally(
+                            animationSpec = tween(180),
+                            initialOffsetX = { if (isForward) it / 6 else -it / 6 }
+                        )).togetherWith(
+                            fadeOut(animationSpec = tween(140)) + slideOutHorizontally(
+                                animationSpec = tween(140),
+                                targetOffsetX = { if (isForward) -it / 6 else it / 6 }
+                            )
+                        )
+                    },
+                    label = "native_tab_transition"
+                ) { targetScreen ->
+                    when (targetScreen) {
+                        CosmoScreen.BROWSER -> {
+                            // Rendered by persistent Box above
+                        }
+                        CosmoScreen.LIBRARY -> {
+                            MyLibraryScreen(
+                                onNavigateToBrowser = { navigateTo(CosmoScreen.BROWSER) },
+                                onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) }
+                            )
+                        }
+                        CosmoScreen.FOR_YOU -> {
+                            ForYouScreen(
+                                onNavigateToDownloads = { navigateTo(CosmoScreen.DOWNLOADS) },
+                                snackbarHostState = snackbarHostState
+                            )
+                        }
+                        CosmoScreen.SETTINGS -> {
+                            SettingsScreen()
+                        }
+                        CosmoScreen.DOWNLOADS -> {
+                            DownloadsScreen(
+                                onNavigateToLibrary = { navigateTo(CosmoScreen.LIBRARY) },
+                                onBack = { currentScreen = previousScreen }
+                            )
+                        }
+                    }
                 }
             }
         }

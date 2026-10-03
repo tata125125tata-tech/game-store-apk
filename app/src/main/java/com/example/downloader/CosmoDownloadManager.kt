@@ -1,7 +1,8 @@
 package com.example.downloader
 
 import android.content.Context
-import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import com.example.installer.PackageInstallerManager
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.InputStream
 import java.io.RandomAccessFile
@@ -32,6 +34,7 @@ import java.net.URLDecoder
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 class CosmoDownloadManager private constructor(private val context: Context) {
 
@@ -147,7 +150,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         suggestedTitle: String? = null,
         iconUrl: String? = null
     ): String {
-        val fileType = detectFileType(url)
+        val fileType = detectFileTypeFromUrl(url)
         val fileName = sanitizeFileName(url, suggestedTitle, fileType)
         val targetFile = File(settingsManager.getDownloadDir(), fileName)
 
@@ -191,7 +194,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
 
         updateItem(id) { item ->
             val paused = item.copy(status = DownloadStatus.PAUSED, speedBytesPerSec = 0L)
-            notificationHelper.updateProgressNotification(paused)
+            notificationHelper.showPausedNotification(paused)
             paused
         }
     }
@@ -203,7 +206,12 @@ class CosmoDownloadManager private constructor(private val context: Context) {
 
         val item = _downloads.value.find { it.id == id }
         if (deleteFile && item != null) {
-            File(item.localFilePath).delete()
+            try {
+                val f = File(item.localFilePath)
+                if (f.exists()) f.delete()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error deleting file for cancelled download $id", e)
+            }
             _downloads.value = _downloads.value.filter { it.id != id }
             libraryStore.removeItem(id)
         } else {
@@ -238,45 +246,79 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         libraryStore.refreshState()
     }
 
+    private fun isWifiConnected(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val activeNetwork = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
     private fun enqueueDownload(item: DownloadItem, file: File) {
         downloadJobs[item.id]?.cancel()
 
         val job = scope.launch {
             var existingLength = if (file.exists()) file.length() else 0L
+
             try {
+                // Check Wi-Fi only constraint
+                if (settingsManager.downloadWifiOnly.value && !isWifiConnected()) {
+                    throw IllegalStateException("Download blocked: Wi-Fi only is enabled in Settings")
+                }
+
                 updateItem(item.id) { it.copy(status = DownloadStatus.DOWNLOADING, errorMessage = null) }
 
-                val requestBuilder = Request.Builder().url(item.originalUrl)
+                // Build request with standard mobile browser headers to avoid HTTP 403
+                val requestBuilder = Request.Builder()
+                    .url(item.originalUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+                    .header("Accept", "*/*")
+                    .header("Accept-Encoding", "identity")
+                    .header("Referer", "https://cosmo-game.pages.dev/")
+
                 if (existingLength > 0) {
-                    requestBuilder.addHeader("Range", "bytes=$existingLength-")
+                    requestBuilder.header("Range", "bytes=$existingLength-")
                 }
 
                 val request = requestBuilder.build()
-                val response = okHttpClient.newCall(request).execute()
+                val response = executeWithRedirectHandling(request)
 
-                if (!response.isSuccessful && response.code != 206) {
-                    if (response.code == 416 || existingLength > 0) {
+                // Real HTTP error checking - no fake success or fake progress!
+                when (response.code) {
+                    401 -> throw IllegalStateException("HTTP 401 Unauthorized: Authentication required by server")
+                    403 -> throw IllegalStateException("HTTP 403 Forbidden: Access denied by download host")
+                    404 -> throw IllegalStateException("HTTP 404 Not Found: Download file does not exist")
+                    416 -> {
+                        // Range Not Satisfiable: File may be already fully downloaded or changed
                         file.delete()
                         existingLength = 0L
-                        val cleanRequest = Request.Builder().url(item.originalUrl).build()
-                        val retryResponse = okHttpClient.newCall(cleanRequest).execute()
+                        val cleanRequest = requestBuilder.removeHeader("Range").build()
+                        val retryResponse = executeWithRedirectHandling(cleanRequest)
+                        if (!retryResponse.isSuccessful) {
+                            throw IllegalStateException("HTTP ${retryResponse.code}: ${retryResponse.message}")
+                        }
                         handleSuccessfulResponse(item.id, retryResponse, file, 0L)
-                    } else {
-                        throw IllegalStateException("HTTP ${response.code}: ${response.message}")
+                        return@launch
                     }
-                } else {
-                    handleSuccessfulResponse(item.id, response, file, existingLength)
+                    in 400..599 -> throw IllegalStateException("HTTP ${response.code}: ${response.message}")
                 }
+
+                if (!response.isSuccessful && response.code != 206) {
+                    throw IllegalStateException("HTTP ${response.code}: ${response.message}")
+                }
+
+                handleSuccessfulResponse(item.id, response, file, existingLength)
 
             } catch (e: CancellationException) {
                 Log.d(TAG, "Download job cancelled for ${item.id}")
             } catch (e: Exception) {
                 Log.e(TAG, "Download error for ${item.id}", e)
+                val realError = e.message ?: "Download connection failed"
                 val failedItem = _downloads.value.find { it.id == item.id }?.copy(
                     status = DownloadStatus.FAILED,
-                    errorMessage = e.message ?: "Download failed",
+                    errorMessage = realError,
                     speedBytesPerSec = 0L
-                ) ?: item.copy(status = DownloadStatus.FAILED, errorMessage = e.message)
+                ) ?: item.copy(status = DownloadStatus.FAILED, errorMessage = realError)
 
                 updateItem(item.id) { failedItem }
                 notificationHelper.showDownloadFailedNotification(failedItem)
@@ -288,13 +330,70 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         downloadJobs[item.id] = job
     }
 
+    /**
+     * Executes the HTTP request and handles 301, 302, 303, 307, 308 redirects with header preservation.
+     */
+    private fun executeWithRedirectHandling(initialRequest: Request): Response {
+        var currentRequest = initialRequest
+        var redirectCount = 0
+        val maxRedirects = 10
+
+        while (redirectCount < maxRedirects) {
+            val response = okHttpClient.newCall(currentRequest).execute()
+            val code = response.code
+
+            // Handle HTTP 301, 302, 303, 307, 308
+            if (code in listOf(301, 302, 303, 307, 308)) {
+                val location = response.header("Location")
+                response.close()
+
+                if (location.isNullOrBlank()) {
+                    return response
+                }
+
+                val newUrl = currentRequest.url.resolve(location) ?: return response
+                val newRequestBuilder = currentRequest.newBuilder().url(newUrl)
+
+                if (code == 303) {
+                    newRequestBuilder.method("GET", null)
+                }
+
+                currentRequest = newRequestBuilder.build()
+                redirectCount++
+            } else {
+                return response
+            }
+        }
+
+        return okHttpClient.newCall(currentRequest).execute()
+    }
+
     private suspend fun handleSuccessfulResponse(
         id: String,
-        response: okhttp3.Response,
-        file: File,
+        response: Response,
+        initialFile: File,
         existingBytes: Long
     ) {
-        val body = response.body ?: throw IllegalStateException("Empty response body")
+        val body = response.body ?: throw IllegalStateException("Empty response body from server")
+        val finalUrl = response.request.url.toString()
+        val contentDisposition = response.header("Content-Disposition")
+        val contentType = response.header("Content-Type")
+
+        // Detect correct file extension (.xapk vs .apk) from final URL and headers
+        val detectedFileType = detectFileType(finalUrl, contentDisposition, contentType)
+        var actualFile = initialFile
+
+        // Adjust file extension if needed
+        val expectedExt = if (detectedFileType == FileType.XAPK) ".xapk" else ".apk"
+        if (!actualFile.name.endsWith(expectedExt, ignoreCase = true)) {
+            val newName = actualFile.name.substringBeforeLast(".") + expectedExt
+            val newFile = File(actualFile.parentFile, newName)
+            if (actualFile.exists()) {
+                actualFile.renameTo(newFile)
+            }
+            actualFile = newFile
+        }
+
         val contentLength = body.contentLength()
         val totalBytes = if (contentLength > 0) {
             existingBytes + contentLength
@@ -303,7 +402,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         }
 
         val append = existingBytes > 0 && response.code == 206
-        val raf = RandomAccessFile(file, "rw")
+        val raf = RandomAccessFile(actualFile, "rw")
         if (append) {
             raf.seek(existingBytes)
         } else {
@@ -335,6 +434,8 @@ class CosmoDownloadManager private constructor(private val context: Context) {
                         lastBytes = downloaded
 
                         val updated = _downloads.value.find { it.id == id }?.copy(
+                            localFilePath = actualFile.absolutePath,
+                            fileType = detectedFileType,
                             totalBytes = totalBytes,
                             downloadedBytes = downloaded,
                             speedBytesPerSec = currentSpeed
@@ -354,24 +455,24 @@ class CosmoDownloadManager private constructor(private val context: Context) {
             }
         }
 
-        // Download Finished - Extract Metadata
+        // Complete Verification & Metadata Extraction
         var parsedPkg: String? = null
         var versionName: String? = null
         var versionCode: Long? = null
         var xapkDetails: com.example.model.XapkInfo? = null
 
         val currentItem = _downloads.value.find { it.id == id }
-        if (currentItem?.fileType == FileType.APK) {
-            parsedPkg = PackageInstallerManager.getPackageNameFromApk(context, file)
+        if (detectedFileType == FileType.APK) {
+            parsedPkg = PackageInstallerManager.getPackageNameFromApk(context, actualFile)
             try {
-                val pi = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+                val pi = context.packageManager.getPackageArchiveInfo(actualFile.absolutePath, 0)
                 versionName = pi?.versionName
                 versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pi?.longVersionCode else pi?.versionCode?.toLong()
             } catch (e: Exception) {
                 // Ignore
             }
-        } else if (currentItem?.fileType == FileType.XAPK) {
-            xapkDetails = PackageInstallerManager.parseXapk(file).getOrNull()
+        } else {
+            xapkDetails = PackageInstallerManager.parseXapk(actualFile).getOrNull()
             parsedPkg = xapkDetails?.packageName
             versionName = xapkDetails?.versionName
             versionCode = xapkDetails?.versionCode
@@ -381,14 +482,16 @@ class CosmoDownloadManager private constructor(private val context: Context) {
 
         val completedItem = (currentItem ?: DownloadItem(
             id = id,
-            title = formatFileTitle(file.name),
+            title = formatFileTitle(actualFile.name),
             originalUrl = "",
-            fileType = if (file.name.endsWith(".xapk", true)) FileType.XAPK else FileType.APK,
-            localFilePath = file.absolutePath
+            fileType = detectedFileType,
+            localFilePath = actualFile.absolutePath
         )).copy(
             status = DownloadStatus.COMPLETED,
-            totalBytes = file.length(),
-            downloadedBytes = file.length(),
+            fileType = detectedFileType,
+            localFilePath = actualFile.absolutePath,
+            totalBytes = actualFile.length(),
+            downloadedBytes = actualFile.length(),
             speedBytesPerSec = 0L,
             packageName = parsedPkg,
             isInstalled = isInstalled,
@@ -405,12 +508,12 @@ class CosmoDownloadManager private constructor(private val context: Context) {
             versionName = versionName,
             versionCode = versionCode,
             iconUrl = completedItem.iconUrl,
-            localFilePath = file.absolutePath,
-            isXapk = completedItem.fileType == FileType.XAPK,
+            localFilePath = actualFile.absolutePath,
+            isXapk = detectedFileType == FileType.XAPK,
             hasObb = (xapkDetails?.totalObbs ?: 0) > 0,
             hasSplitApks = (xapkDetails?.totalApks ?: 1) > 1,
             totalApks = xapkDetails?.totalApks ?: 1,
-            fileSizeBytes = file.length(),
+            fileSizeBytes = actualFile.length(),
             downloadedAt = System.currentTimeMillis(),
             originalUrl = completedItem.originalUrl
         )
@@ -436,7 +539,7 @@ class CosmoDownloadManager private constructor(private val context: Context) {
         }
     }
 
-    private fun detectFileType(url: String): FileType {
+    private fun detectFileTypeFromUrl(url: String): FileType {
         val cleanUrl = url.substringBefore("?").lowercase()
         return when {
             cleanUrl.endsWith(".xapk") -> FileType.XAPK
@@ -445,6 +548,38 @@ class CosmoDownloadManager private constructor(private val context: Context) {
             url.contains(".apk", ignoreCase = true) -> FileType.APK
             else -> FileType.APK
         }
+    }
+
+    private fun detectFileType(url: String, contentDisposition: String?, contentType: String?): FileType {
+        // 1. Check Content-Disposition filename
+        if (!contentDisposition.isNullOrBlank()) {
+            val filename = extractFilenameFromContentDisposition(contentDisposition)
+            if (filename != null) {
+                if (filename.endsWith(".xapk", ignoreCase = true)) return FileType.XAPK
+                if (filename.endsWith(".apk", ignoreCase = true)) return FileType.APK
+            }
+        }
+
+        // 2. Check URL path
+        val cleanUrl = url.substringBefore("?").lowercase()
+        if (cleanUrl.endsWith(".xapk") || url.contains(".xapk", ignoreCase = true)) return FileType.XAPK
+        if (cleanUrl.endsWith(".apk") || url.contains(".apk", ignoreCase = true)) return FileType.APK
+
+        return FileType.APK
+    }
+
+    private fun extractFilenameFromContentDisposition(contentDisposition: String): String? {
+        try {
+            val pattern = Pattern.compile("filename[*]?=['\"]?(?:UTF-8'')?([^;'\"]+)", Pattern.CASE_INSENSITIVE)
+            val matcher = pattern.matcher(contentDisposition)
+            if (matcher.find()) {
+                val raw = matcher.group(1) ?: return null
+                return URLDecoder.decode(raw, "UTF-8")
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        return null
     }
 
     private fun sanitizeFileName(url: String, title: String?, fileType: FileType): String {

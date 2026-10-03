@@ -38,6 +38,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep Link for https://cosmo-game.pages.dev/ -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="cosmo-game.pages.dev" />
+                <data
+                    android:scheme="http"
+                    android:host="cosmo-game.pages.dev" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -55,6 +68,16 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.aistudio.cosmogamestore.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".downloader.DownloadActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.downloader.ACTION_STOP" />
+                <action android:name="com.example.downloader.ACTION_RESUME" />
+                <action android:name="com.example.downloader.ACTION_CANCEL" />
             </intent-filter>
         </receiver>
 

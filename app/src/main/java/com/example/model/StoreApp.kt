@@ -43,6 +43,9 @@ data class StoreApp(
                 else -> "New"
             }
         }
+
+    val isXapk: Boolean
+        get() = androidDownloadUrl?.contains(".xapk", ignoreCase = true) == true
 }
 
 @JsonClass(generateAdapter = true)

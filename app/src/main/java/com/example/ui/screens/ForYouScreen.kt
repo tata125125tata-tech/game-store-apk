@@ -24,11 +24,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,11 +71,6 @@ import com.example.downloader.CosmoDownloadManager
 import com.example.model.StoreApp
 import com.example.model.StoreCategory
 import com.example.ui.theme.CosmoAmber
-import com.example.ui.theme.CosmoBackgroundDark
-import com.example.ui.theme.CosmoCardBorder
-import com.example.ui.theme.CosmoCardDark
-import com.example.ui.theme.CosmoCyan
-import com.example.ui.theme.CosmoGreen
 import com.example.ui.theme.CosmoPurple
 import kotlinx.coroutines.launch
 
@@ -85,28 +82,33 @@ fun ForYouScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val downloadManager = remember { CosmoDownloadManager.getInstance(context) }
+    val scope = rememberCoroutineScope()
 
     var apps by remember { mutableStateOf<List<StoreApp>>(emptyList()) }
     var categories by remember { mutableStateOf<List<StoreCategory>>(emptyList()) }
+    var selectedCategoryId by remember { mutableStateOf<Int?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var selectedCategoryId by remember { mutableStateOf<Int?>(null) }
+
     var selectedAppDetails by remember { mutableStateOf<StoreApp?>(null) }
 
     fun loadData() {
         scope.launch {
             isLoading = true
             errorMessage = null
+
             try {
-                val fetchedApps = CosmoApiClient.apiService.getApps()
-                val fetchedCats = try { CosmoApiClient.apiService.getCategories() } catch (e: Exception) { emptyList() }
-                apps = fetchedApps
-                categories = fetchedCats
+                categories = CosmoApiClient.apiService.getCategories()
             } catch (e: Exception) {
-                errorMessage = e.message ?: "Failed to connect to store"
-            } finally {
+                // Keep default empty categories
+            }
+
+            try {
+                apps = CosmoApiClient.apiService.getApps()
+                isLoading = false
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Failed to connect to Cosmo API"
                 isLoading = false
             }
         }
@@ -153,26 +155,54 @@ fun ForYouScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CosmoBackgroundDark)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("for_you_screen")
     ) {
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = CosmoCyan)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Curating games for you...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = "Loading Cosmo Catalog...",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
                 }
             }
-        } else if (errorMessage != null && apps.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+        } else if (errorMessage != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Unable to load recommendations", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(errorMessage ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Unable to load games",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = errorMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = { loadData() }, colors = ButtonDefaults.buttonColors(containerColor = CosmoCyan, contentColor = Color.Black)) {
-                        Text("Retry")
+                    Button(
+                        onClick = { loadData() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Retry", color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -181,8 +211,8 @@ fun ForYouScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp)
             ) {
-                // Featured Hero Banner
-                if (featuredApp != null) {
+                // Hero Feature
+                if (featuredApp != null && selectedCategoryId == null) {
                     item {
                         FeaturedHeroCard(
                             app = featuredApp,
@@ -193,13 +223,13 @@ fun ForYouScreen(
                     }
                 }
 
-                // Category Chips
-                item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                // Category Chips Row
+                if (categories.isNotEmpty()) {
+                    item {
                         Text(
                             text = "CATEGORIES",
                             style = MaterialTheme.typography.labelSmall.copy(
-                                color = CosmoCyan,
+                                color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp
                             ),
@@ -216,16 +246,10 @@ fun ForYouScreen(
                                     onClick = { selectedCategoryId = null },
                                     label = { Text("All", fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                                        selectedLabelColor = CosmoCyan,
-                                        containerColor = CosmoCardDark,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                        containerColor = MaterialTheme.colorScheme.surface,
                                         labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = if (selectedCategoryId == null) CosmoCyan else CosmoCardBorder,
-                                        selectedBorderColor = CosmoCyan,
-                                        enabled = true,
-                                        selected = selectedCategoryId == null
                                     )
                                 )
                             }
@@ -236,16 +260,10 @@ fun ForYouScreen(
                                     onClick = { selectedCategoryId = cat.id },
                                     label = { Text(cat.name, fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                                        selectedLabelColor = CosmoCyan,
-                                        containerColor = CosmoCardDark,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                                        containerColor = MaterialTheme.colorScheme.surface,
                                         labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        borderColor = if (selectedCategoryId == cat.id) CosmoCyan else CosmoCardBorder,
-                                        selectedBorderColor = CosmoCyan,
-                                        enabled = true,
-                                        selected = selectedCategoryId == cat.id
                                     )
                                 )
                             }
@@ -260,11 +278,11 @@ fun ForYouScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Recommended Games (${filteredApps.size})",
+                            text = if (selectedCategoryId == null) "Recommended For You" else "Category Games",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -272,7 +290,7 @@ fun ForYouScreen(
                         )
 
                         IconButton(onClick = { loadData() }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = CosmoCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -297,7 +315,7 @@ fun ForYouScreen(
             ModalBottomSheet(
                 onDismissRequest = { selectedAppDetails = null },
                 sheetState = sheetState,
-                containerColor = CosmoCardDark,
+                containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 Column(
@@ -312,7 +330,7 @@ fun ForYouScreen(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(CosmoBackgroundDark),
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             if (!app.iconUrl.isNullOrBlank()) {
@@ -322,7 +340,7 @@ fun ForYouScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
-                                Icon(Icons.Default.SportsEsports, contentDescription = null, tint = CosmoCyan, modifier = Modifier.size(32.dp))
+                                Icon(Icons.Default.SportsEsports, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
                             }
                         }
 
@@ -339,7 +357,7 @@ fun ForYouScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(app.displayDownloads, fontSize = 11.sp, color = CosmoCyan)
+                                Text(app.displayDownloads, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -350,7 +368,7 @@ fun ForYouScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Big Download Button
+                    // Download Button
                     Button(
                         onClick = {
                             selectedAppDetails = null
@@ -359,35 +377,41 @@ fun ForYouScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CosmoCyan,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp)
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
-                        Icon(Icons.Default.Download, contentDescription = null)
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Download APK (${app.size ?: "Fast"})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            text = "Download Package (${app.size ?: "Direct"})",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Screenshots Gallery
-                    val screenshots = app.parsedScreenshots
-                    if (screenshots.isNotEmpty()) {
-                        Text("Screenshots", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    // Screenshots Carousel
+                    if (app.parsedScreenshots.isNotEmpty()) {
+                        Text("Screenshots", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(screenshots) { url ->
-                                Box(
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(app.parsedScreenshots) { imgUrl ->
+                                Card(
+                                    shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
-                                        .height(180.dp)
-                                        .width(280.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp))
+                                        .height(150.dp)
+                                        .width(240.dp)
                                 ) {
                                     AsyncImage(
-                                        model = url,
+                                        model = imgUrl,
                                         contentDescription = "Screenshot",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
@@ -398,18 +422,18 @@ fun ForYouScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    // About description
-                    Text("About Game", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = app.description ?: "No description provided.",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 20.sp
+                    // Description
+                    if (!app.description.isNullOrBlank()) {
+                        Text("About this game", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = app.description,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 20.sp
+                            )
                         )
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
+                    }
                 }
             }
         }
@@ -427,12 +451,11 @@ fun FeaturedHeroCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable { onCardClick() }
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(18.dp)),
-        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(18.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(18.dp)
     ) {
         Column {
-            // Hero Image / Screenshot
             val heroImg = app.parsedScreenshots.firstOrNull() ?: app.iconUrl
             Box(
                 modifier = Modifier
@@ -440,7 +463,7 @@ fun FeaturedHeroCard(
                     .height(170.dp)
                     .background(
                         Brush.verticalGradient(
-                            listOf(CosmoPurple.copy(alpha = 0.4f), CosmoBackgroundDark)
+                            listOf(CosmoPurple.copy(alpha = 0.4f), MaterialTheme.colorScheme.background)
                         )
                     )
             ) {
@@ -453,12 +476,11 @@ fun FeaturedHeroCard(
                     )
                 }
 
-                // Overlay badge
                 Box(
                     modifier = Modifier
                         .padding(12.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(CosmoCyan)
+                        .background(MaterialTheme.colorScheme.primary)
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                         .align(Alignment.TopStart)
                 ) {
@@ -466,12 +488,11 @@ fun FeaturedHeroCard(
                         text = "FEATURED TITLE",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.Black
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }
 
-            // Info & Download Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -496,15 +517,15 @@ fun FeaturedHeroCard(
                 Button(
                     onClick = onDownload,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CosmoCyan,
-                        contentColor = Color.Black
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.height(38.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Get APK", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("Download", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         }
@@ -522,9 +543,9 @@ fun StoreAppCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable { onCardClick() }
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(14.dp)),
-        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
-        shape = RoundedCornerShape(14.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Row(
             modifier = Modifier
@@ -534,9 +555,9 @@ fun StoreAppCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(54.dp)
+                    .size(52.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(CosmoBackgroundDark),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (!app.iconUrl.isNullOrBlank()) {
@@ -546,7 +567,12 @@ fun StoreAppCard(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(Icons.Default.SportsEsports, contentDescription = null, tint = CosmoCyan, modifier = Modifier.size(28.dp))
+                    Icon(
+                        imageVector = if (app.isXapk) Icons.Default.Archive else Icons.Default.InstallMobile,
+                        contentDescription = null,
+                        tint = if (app.isXapk) CosmoPurple else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
 
@@ -555,37 +581,40 @@ fun StoreAppCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = app.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = app.devName ?: "Developer",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Star, contentDescription = null, tint = CosmoAmber, modifier = Modifier.size(12.dp))
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        text = String.format("%.1f", app.ratingAvg ?: 0.0),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(app.size ?: "—", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(app.displayDownloads, fontSize = 11.sp, color = CosmoCyan)
+                    if (app.isXapk) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(CosmoPurple.copy(alpha = 0.2f))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text("XAPK", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = CosmoPurple)
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
+                    if (app.ratingAvg != null && app.ratingAvg > 0) {
+                        Icon(Icons.Default.Star, contentDescription = null, tint = CosmoAmber, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(String.format("%.1f", app.ratingAvg), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
+                    Text(app.size ?: "Direct", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -593,13 +622,13 @@ fun StoreAppCard(
 
             Button(
                 onClick = onDownload,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = CosmoCyan.copy(alpha = 0.15f),
-                    contentColor = CosmoCyan
-                ),
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(36.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.height(34.dp)
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))

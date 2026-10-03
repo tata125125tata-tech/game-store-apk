@@ -68,9 +68,6 @@ import com.example.model.DownloadItem
 import com.example.model.DownloadStatus
 import com.example.model.FileType
 import com.example.ui.theme.CosmoAmber
-import com.example.ui.theme.CosmoBackgroundDark
-import com.example.ui.theme.CosmoCardBorder
-import com.example.ui.theme.CosmoCardDark
 import com.example.ui.theme.CosmoCyan
 import com.example.ui.theme.CosmoGreen
 import com.example.ui.theme.CosmoPurple
@@ -106,7 +103,7 @@ fun DownloadsScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CosmoBackgroundDark)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("downloads_screen")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -150,10 +147,10 @@ fun DownloadsScreen(
                         imageVector = Icons.Default.FolderSpecial,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = CosmoCyan
+                        tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("My Library", fontSize = 12.sp, color = CosmoCyan)
+                    Text("My Library", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -181,16 +178,10 @@ fun DownloadsScreen(
                         onClick = { selectedFilter = key },
                         label = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                            selectedLabelColor = CosmoCyan,
-                            containerColor = CosmoCardDark,
+                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            selectedLabelColor = MaterialTheme.colorScheme.primary,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = if (selectedFilter == key) CosmoCyan else CosmoCardBorder,
-                            selectedBorderColor = CosmoCyan,
-                            enabled = true,
-                            selected = selectedFilter == key
                         )
                     )
                 }
@@ -213,7 +204,7 @@ fun DownloadsScreen(
                             modifier = Modifier
                                 .size(56.dp)
                                 .clip(CircleShape)
-                                .background(CosmoCardDark),
+                                .background(MaterialTheme.colorScheme.surface),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -252,7 +243,7 @@ fun DownloadsScreen(
                             item = item,
                             onPause = { downloadManager.pauseDownload(item.id) },
                             onResume = { downloadManager.resumeDownload(item.id) },
-                            onCancel = { downloadManager.cancelDownload(item.id, deleteFile = false) },
+                            onCancel = { downloadManager.cancelDownload(item.id, deleteFile = true) },
                             onRetry = { downloadManager.resumeDownload(item.id) },
                             onDelete = { itemToDelete = item }
                         )
@@ -302,8 +293,8 @@ fun DownloadStatusCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -313,7 +304,7 @@ fun DownloadStatusCard(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(CosmoBackgroundDark),
+                        .background(MaterialTheme.colorScheme.background),
                     contentAlignment = Alignment.Center
                 ) {
                     if (!item.iconUrl.isNullOrBlank()) {
@@ -326,7 +317,7 @@ fun DownloadStatusCard(
                         Icon(
                             imageVector = if (item.fileType == FileType.XAPK) Icons.Default.Archive else Icons.Default.InstallMobile,
                             contentDescription = null,
-                            tint = if (item.fileType == FileType.XAPK) CosmoPurple else CosmoCyan,
+                            tint = if (item.fileType == FileType.XAPK) CosmoPurple else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -358,7 +349,7 @@ fun DownloadStatusCard(
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (item.fileType == FileType.XAPK) CosmoPurple.copy(alpha = 0.2f)
-                                    else CosmoCyan.copy(alpha = 0.2f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                 )
                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                         ) {
@@ -366,7 +357,7 @@ fun DownloadStatusCard(
                                 text = if (item.fileType == FileType.XAPK) "XAPK" else "APK",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (item.fileType == FileType.XAPK) CosmoPurple else CosmoCyan
+                                color = if (item.fileType == FileType.XAPK) CosmoPurple else MaterialTheme.colorScheme.primary
                             )
                         }
 
@@ -416,8 +407,8 @@ fun DownloadStatusCard(
                         .fillMaxWidth()
                         .height(5.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = CosmoCyan,
-                    trackColor = CosmoCardBorder
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outline
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -431,7 +422,7 @@ fun DownloadStatusCard(
                         text = "${item.progressPercent}%",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = CosmoCyan
+                        color = MaterialTheme.colorScheme.primary
                     )
 
                     if (item.formattedSpeed.isNotBlank()) {
@@ -451,11 +442,11 @@ fun DownloadStatusCard(
                         }
                     }
 
-                    // Action buttons: Pause / Resume / Cancel
+                    // Action buttons: Pause (Stop) / Resume / Cancel
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (item.status == DownloadStatus.DOWNLOADING) {
                             IconButton(onClick = onPause, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Pause, contentDescription = "Pause", tint = CosmoAmber, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Pause, contentDescription = "Stop", tint = CosmoAmber, modifier = Modifier.size(18.dp))
                             }
                         } else if (item.status == DownloadStatus.PAUSED) {
                             IconButton(onClick = onResume, modifier = Modifier.size(28.dp)) {
@@ -494,7 +485,7 @@ fun DownloadStatusCard(
                     }
 
                     IconButton(onClick = onRetry, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = CosmoCyan, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 }
             }

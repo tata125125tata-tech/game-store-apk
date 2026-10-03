@@ -1,7 +1,5 @@
 package com.example.ui.screens
 
-import android.content.Context
-import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -33,7 +31,6 @@ import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -77,11 +74,7 @@ import com.example.library.LibraryManager
 import com.example.library.LibraryStore
 import com.example.model.InstalledGame
 import com.example.model.LibraryItem
-import com.example.ui.theme.CosmoAmber
-import com.example.ui.theme.CosmoBackgroundDark
-import com.example.ui.theme.CosmoCardBorder
-import com.example.ui.theme.CosmoCardDark
-import com.example.ui.theme.CosmoCyan
+import com.example.settings.SettingsManager
 import com.example.ui.theme.CosmoGreen
 import com.example.ui.theme.CosmoPurple
 import com.example.ui.theme.CosmoRed
@@ -98,6 +91,7 @@ fun MyLibraryScreen(
     val scope = rememberCoroutineScope()
     val libraryStore = remember { LibraryStore.getInstance(context) }
     val downloadManager = remember { CosmoDownloadManager.getInstance(context) }
+    val settingsManager = remember { SettingsManager.getInstance(context) }
 
     val libraryItems by libraryStore.items.collectAsState()
     val activeDownloadsCount by downloadManager.activeDownloadsCount.collectAsState()
@@ -125,7 +119,7 @@ fun MyLibraryScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CosmoBackgroundDark)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("my_library_screen")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -137,8 +131,8 @@ fun MyLibraryScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .clickable { onNavigateToDownloads() }
-                        .border(1.dp, CosmoCyan.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
-                    colors = CardDefaults.cardColors(containerColor = CosmoCyan.copy(alpha = 0.1f)),
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Row(
@@ -152,7 +146,7 @@ fun MyLibraryScreen(
                             Icon(
                                 imageVector = Icons.Default.Download,
                                 contentDescription = null,
-                                tint = CosmoCyan,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -160,7 +154,7 @@ fun MyLibraryScreen(
                                 text = "$activeDownloadsCount download in progress",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = CosmoCyan
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
 
@@ -200,16 +194,10 @@ fun MyLibraryScreen(
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                        selectedLabelColor = CosmoCyan,
-                        containerColor = CosmoCardDark,
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        containerColor = MaterialTheme.colorScheme.surface,
                         labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (selectedTab == "DOWNLOADS") CosmoCyan else CosmoCardBorder,
-                        selectedBorderColor = CosmoCyan,
-                        enabled = true,
-                        selected = selectedTab == "DOWNLOADS"
                     )
                 )
 
@@ -227,16 +215,10 @@ fun MyLibraryScreen(
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = CosmoCyan.copy(alpha = 0.2f),
-                        selectedLabelColor = CosmoCyan,
-                        containerColor = CosmoCardDark,
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        containerColor = MaterialTheme.colorScheme.surface,
                         labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        borderColor = if (selectedTab == "INSTALLED") CosmoCyan else CosmoCardBorder,
-                        selectedBorderColor = CosmoCyan,
-                        enabled = true,
-                        selected = selectedTab == "INSTALLED"
                     )
                 )
             }
@@ -244,7 +226,6 @@ fun MyLibraryScreen(
             // Content List
             if (selectedTab == "DOWNLOADS") {
                 if (libraryItems.isEmpty()) {
-                    // Empty state for downloaded items
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -259,13 +240,13 @@ fun MyLibraryScreen(
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(CircleShape)
-                                    .background(CosmoCardDark),
+                                    .background(MaterialTheme.colorScheme.surface),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.FolderSpecial,
                                     contentDescription = null,
-                                    tint = CosmoCyan,
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(28.dp)
                                 )
                             }
@@ -289,8 +270,8 @@ fun MyLibraryScreen(
                             Button(
                                 onClick = onNavigateToBrowser,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = CosmoCyan,
-                                    contentColor = Color.Black
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
@@ -360,7 +341,7 @@ fun MyLibraryScreen(
                 // Device Installed Apps Tab
                 if (isLoadingInstalled) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = CosmoCyan)
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                 } else if (installedGames.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -401,7 +382,7 @@ fun MyLibraryScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(vertical = 12.dp)
                     ) {
-                        CircularProgressIndicator(color = CosmoCyan, modifier = Modifier.size(28.dp))
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(text = installingItemStatus ?: "Preparing installation...")
                     }
@@ -453,8 +434,8 @@ fun LibraryPackageCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -464,7 +445,7 @@ fun LibraryPackageCard(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(CosmoBackgroundDark),
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
                     if (!item.iconUrl.isNullOrBlank()) {
@@ -477,7 +458,7 @@ fun LibraryPackageCard(
                         Icon(
                             imageVector = if (item.isXapk) Icons.Default.Archive else Icons.Default.InstallMobile,
                             contentDescription = null,
-                            tint = if (item.isXapk) CosmoPurple else CosmoCyan,
+                            tint = if (item.isXapk) CosmoPurple else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -509,7 +490,7 @@ fun LibraryPackageCard(
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
                                     if (item.isXapk) CosmoPurple.copy(alpha = 0.2f)
-                                    else CosmoCyan.copy(alpha = 0.2f)
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                 )
                                 .padding(horizontal = 6.dp, vertical = 1.dp)
                         ) {
@@ -517,7 +498,7 @@ fun LibraryPackageCard(
                                 text = item.typeLabel,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (item.isXapk) CosmoPurple else CosmoCyan
+                                color = if (item.isXapk) CosmoPurple else MaterialTheme.colorScheme.primary
                             )
                         }
 
@@ -559,7 +540,7 @@ fun LibraryPackageCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(CosmoBackgroundDark, RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Icon(
@@ -656,8 +637,8 @@ fun LibraryPackageCard(
                         onClick = onInstall,
                         shape = RoundedCornerShape(6.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (item.isXapk) CosmoPurple else CosmoCyan,
-                            contentColor = if (item.isXapk) Color.White else Color.Black
+                            containerColor = if (item.isXapk) CosmoPurple else MaterialTheme.colorScheme.primary,
+                            contentColor = if (item.isXapk) Color.White else MaterialTheme.colorScheme.onPrimary
                         ),
                         contentPadding = PaddingValues(horizontal = 14.dp),
                         modifier = Modifier.height(34.dp)
@@ -695,8 +676,8 @@ fun InstalledDeviceAppCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, CosmoCardBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = CosmoCardDark),
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -709,7 +690,7 @@ fun InstalledDeviceAppCard(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(CosmoBackgroundDark),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 if (bitmap != null) {
@@ -722,7 +703,7 @@ fun InstalledDeviceAppCard(
                     Icon(
                         imageVector = Icons.Default.SportsEsports,
                         contentDescription = null,
-                        tint = CosmoCyan,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }

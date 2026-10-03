@@ -9,14 +9,15 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
-import com.example.R
 import com.example.model.DownloadItem
 import com.example.model.FileType
+import com.example.settings.SettingsManager
 
 class DownloadNotificationHelper(private val context: Context) {
 
     private val notificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val settingsManager = SettingsManager.getInstance(context)
 
     init {
         createNotificationChannels()
@@ -29,7 +30,7 @@ class DownloadNotificationHelper(private val context: Context) {
                 "Active Downloads",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows real-time download progress for APK and XAPK packages"
+                description = "Real-time download progress for APK and XAPK packages"
                 setShowBadge(false)
             }
 
@@ -52,6 +53,7 @@ class DownloadNotificationHelper(private val context: Context) {
     }
 
     fun updateProgressNotification(item: DownloadItem) {
+        if (!settingsManager.downloadNotificationsEnabled.value) return
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
 
         val typeText = if (item.fileType == FileType.XAPK) "XAPK" else "APK"
@@ -61,6 +63,7 @@ class DownloadNotificationHelper(private val context: Context) {
             "${item.progressPercent}% · ${item.formattedDownloaded} / ${item.formattedTotal}"
         }
 
+        // Tap notification to open Download Manager in app
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_DESTINATION, DESTINATION_DOWNLOADS)
@@ -69,6 +72,30 @@ class DownloadNotificationHelper(private val context: Context) {
             context,
             getNotificationId(item.id),
             openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Action: STOP (Pause download)
+        val stopIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+            action = DownloadActionReceiver.ACTION_STOP
+            putExtra(DownloadActionReceiver.EXTRA_DOWNLOAD_ID, item.id)
+        }
+        val stopPendingIntent = PendingIntent.getBroadcast(
+            context,
+            getNotificationId(item.id) + 10,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Action: CANCEL (Cancel and clean up incomplete file)
+        val cancelIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+            action = DownloadActionReceiver.ACTION_CANCEL
+            putExtra(DownloadActionReceiver.EXTRA_DOWNLOAD_ID, item.id)
+        }
+        val cancelPendingIntent = PendingIntent.getBroadcast(
+            context,
+            getNotificationId(item.id) + 20,
+            cancelIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -81,14 +108,89 @@ class DownloadNotificationHelper(private val context: Context) {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                "Stop",
+                stopPendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Cancel",
+                cancelPendingIntent
+            )
+
+        notificationManager.notify(getNotificationId(item.id), builder.build())
+    }
+
+    fun showPausedNotification(item: DownloadItem) {
+        if (!settingsManager.downloadNotificationsEnabled.value) return
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+
+        val typeText = if (item.fileType == FileType.XAPK) "XAPK" else "APK"
+
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_DESTINATION, DESTINATION_DOWNLOADS)
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            context,
+            getNotificationId(item.id),
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Action: RESUME
+        val resumeIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+            action = DownloadActionReceiver.ACTION_RESUME
+            putExtra(DownloadActionReceiver.EXTRA_DOWNLOAD_ID, item.id)
+        }
+        val resumePendingIntent = PendingIntent.getBroadcast(
+            context,
+            getNotificationId(item.id) + 30,
+            resumeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Action: CANCEL
+        val cancelIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+            action = DownloadActionReceiver.ACTION_CANCEL
+            putExtra(DownloadActionReceiver.EXTRA_DOWNLOAD_ID, item.id)
+        }
+        val cancelPendingIntent = PendingIntent.getBroadcast(
+            context,
+            getNotificationId(item.id) + 20,
+            cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_PROGRESS_ID)
+            .setSmallIcon(android.R.drawable.ic_media_pause)
+            .setContentTitle("${item.title} ($typeText) - Paused")
+            .setContentText("Paused · ${item.formattedDownloaded} / ${item.formattedTotal}")
+            .setProgress(100, item.progressPercent, false)
+            .setContentIntent(openAppPendingIntent)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(
+                android.R.drawable.ic_media_play,
+                "Resume",
+                resumePendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Cancel",
+                cancelPendingIntent
+            )
 
         notificationManager.notify(getNotificationId(item.id), builder.build())
     }
 
     fun showDownloadCompleteNotification(item: DownloadItem) {
+        if (!settingsManager.downloadNotificationsEnabled.value) return
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
 
-        // Dismiss progress notification
+        // Dismiss active progress notification
         notificationManager.cancel(getNotificationId(item.id))
 
         val typeText = if (item.fileType == FileType.XAPK) "XAPK" else "APK"
@@ -107,7 +209,7 @@ class DownloadNotificationHelper(private val context: Context) {
         val builder = NotificationCompat.Builder(context, CHANNEL_COMPLETE_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("${item.title} ($typeText)")
-            .setContentText("Download complete · ${item.formattedTotal} · Tap to install")
+            .setContentText("Download complete · ${item.formattedTotal} · Ready to install")
             .setContentIntent(openLibraryPendingIntent)
             .setAutoCancel(true)
             .addAction(
@@ -120,7 +222,8 @@ class DownloadNotificationHelper(private val context: Context) {
         notificationManager.notify(getNotificationId(item.id), builder.build())
     }
 
-    fun showDownloadFailedNotification(item: DownloadItem, onRetryPendingIntent: PendingIntent? = null) {
+    fun showDownloadFailedNotification(item: DownloadItem) {
+        if (!settingsManager.downloadNotificationsEnabled.value) return
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
 
         notificationManager.cancel(getNotificationId(item.id))
@@ -138,6 +241,18 @@ class DownloadNotificationHelper(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Retry Action
+        val retryIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+            action = DownloadActionReceiver.ACTION_RESUME
+            putExtra(DownloadActionReceiver.EXTRA_DOWNLOAD_ID, item.id)
+        }
+        val retryPendingIntent = PendingIntent.getBroadcast(
+            context,
+            getNotificationId(item.id) + 3,
+            retryIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, CHANNEL_COMPLETE_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("${item.title} ($typeText)")
@@ -145,14 +260,11 @@ class DownloadNotificationHelper(private val context: Context) {
             .setContentIntent(openAppPendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-
-        if (onRetryPendingIntent != null) {
-            builder.addAction(
+            .addAction(
                 android.R.drawable.ic_popup_sync,
                 "Retry",
-                onRetryPendingIntent
+                retryPendingIntent
             )
-        }
 
         notificationManager.notify(getNotificationId(item.id), builder.build())
     }
